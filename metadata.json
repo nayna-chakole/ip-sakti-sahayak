@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix Remix Remix IP-SAKTI Sahayak final2",
+  "description": "Citation-grounded AI assistant for Intellectual Property and regulatory guidance for Ayurvedic products (SIH 2026 PS 26045, Ministry of Ayush / AIIA)",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
