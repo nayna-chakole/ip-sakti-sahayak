@@ -20,6 +20,8 @@ interface AuthContextType {
   }) => Promise<void>;
   logout: () => Promise<void>;
   updateUserLanguage: (lang: Language) => Promise<void>;
+  isAdmin: boolean;
+  isExpert: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -139,7 +141,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         login,
         register,
         logout,
-        updateUserLanguage
+        updateUserLanguage,
+        isAdmin: user?.accessRole === 'admin',
+        isExpert: user?.accessRole === 'expert'
       }}
     >
       {children}

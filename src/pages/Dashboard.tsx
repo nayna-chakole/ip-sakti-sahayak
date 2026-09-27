@@ -505,6 +505,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       <DocumentLibraryModal
         isOpen={isKnowledgeOpen}
         onClose={() => setIsKnowledgeOpen(false)}
+        canManage={user?.accessRole === 'admin'}
       />
 
       {/* Human IP Facilitator Review Modal */}

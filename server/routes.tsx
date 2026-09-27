@@ -1,5 +1,6 @@
 import { Response, Router, Request } from 'express';
 import { AuthenticatedRequest, requireAuth, optionalAuth } from './auth.js';
+import { requireRole } from './roleGuard.js';
 import { db, WizardAnswers } from './db.js';
 import { executePythonBackend } from './pythonBridge.js';
 
@@ -661,10 +662,61 @@ apiRouter.delete('/analysis/history', requireAuth, (req: AuthenticatedRequest, r
 });
 
 // =========================================================================
+// ADMIN — USER MANAGEMENT (admin-only)
+// =========================================================================
+
+apiRouter.get('/admin/users', requireAuth, requireRole('admin'), (_req: AuthenticatedRequest, res: Response) => {
+  const users = (db as unknown as { getUsers: () => unknown[] }).getUsers();
+  return res.json({ users });
+});
+
+// Change another user's accessRole. Deliberately NOT allowed to target req.user's own
+// id here — an admin demoting themselves via this bulk endpoint, especially the last
+// remaining admin, would lock everyone out of admin functionality.
+apiRouter.patch('/admin/users/:id/access-role', requireAuth, requireRole('admin'), (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const { accessRole } = req.body;
+  const validRoles = ['admin', 'expert', 'user'];
+
+  if (!accessRole || !validRoles.includes(accessRole)) {
+    return res.status(400).json({ error: `accessRole must be one of: ${validRoles.join(', ')}` });
+  }
+
+  if (id === req.user!.id) {
+    return res.status(400).json({ error: 'Use a second admin account to change your own access role.' });
+  }
+
+  const target = db.findUserById(id);
+  if (!target) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  if ((target as unknown as { accessRole?: string }).accessRole === 'admin' && accessRole !== 'admin' && (db as unknown as { getUsers: () => Array<{ accessRole: string }> }).getUsers().filter(user => user.accessRole === 'admin').length <= 1) {
+    return res.status(400).json({ error: 'Cannot remove the last remaining admin account.' });
+  }
+
+  const updated = (db as unknown as {
+    setAccessRole: (userId: string, role: string) =>
+      | { id: string; name: string; email: string; accessRole: string }
+      | undefined;
+  }).setAccessRole(id, accessRole);
+  if (!updated) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+  return res.json({
+    message: 'Access role updated',
+    user: { id: updated.id, name: updated.name, email: updated.email, accessRole }
+  });
+});
+
+// =========================================================================
 // KNOWLEDGE BASE & STATUTES
 // =========================================================================
 
-apiRouter.get('/knowledge/documents', async (_req, res) => {
+// READ: any authenticated user (user/expert/admin) can see which statutory documents
+// are currently loaded — this is informational/transparency data shown alongside
+// citations, not a privileged action.
+apiRouter.get('/knowledge/documents', requireAuth, async (_req, res) => {
   try {
     const data = await executePythonBackend('knowledge');
     const loadedState = db.getKnowledgeLoadedState();
@@ -679,7 +731,10 @@ apiRouter.get('/knowledge/documents', async (_req, res) => {
   }
 });
 
-apiRouter.post('/knowledge/toggle', async (req: Request, res: Response) => {
+// WRITE: this flips a document on/off for EVERY user of the app (it's global,
+// shared state in store.json), so it is admin-only. Previously this endpoint had
+// no auth check at all — this was the most critical finding in the audit.
+apiRouter.post('/knowledge/toggle', requireAuth, requireRole('admin'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { documentId, loaded } = req.body;
     if (!documentId) {
@@ -807,7 +862,10 @@ apiRouter.get('/facilitator/review/:id', requireAuth, (req: AuthenticatedRequest
 // RAG BENCHMARK & EVALUATION SUITE (SIH PS 26045 COMPLIANCE)
 // =========================================================================
 
-apiRouter.get('/rag/benchmark', async (_req, res) => {
+// Internal eval/benchmark tooling — not a normal-user feature, and each call spawns
+// a Python process, so it's restricted to admin to avoid unauthenticated compute
+// triggering / abuse.
+apiRouter.get('/rag/benchmark', requireAuth, requireRole('admin'), async (_req, res) => {
   try {
     const report = await executePythonBackend('benchmark');
     return res.json(report);
@@ -817,7 +875,7 @@ apiRouter.get('/rag/benchmark', async (_req, res) => {
   }
 });
 
-apiRouter.post('/rag/evaluate', async (_req, res) => {
+apiRouter.post('/rag/evaluate', requireAuth, requireRole('admin'), async (_req, res) => {
   try {
     const report = await executePythonBackend('evaluate');
     return res.json(report);

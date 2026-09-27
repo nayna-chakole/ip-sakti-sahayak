@@ -27,9 +27,14 @@ import {
 interface DocumentLibraryModalProps {
   isOpen: boolean;
   onClose: () => void;
+  // Only admins can toggle documents in/out of the retrieval corpus. Everyone else
+  // (expert or user) still gets the full read-only list — this is enforced again on
+  // the backend (POST /api/knowledge/toggle is admin-only), this prop just avoids
+  // showing controls that would return a 403 anyway.
+  canManage: boolean;
 }
 
-export const DocumentLibraryModal: React.FC<DocumentLibraryModalProps> = ({ isOpen, onClose }) => {
+export const DocumentLibraryModal: React.FC<DocumentLibraryModalProps> = ({ isOpen, onClose, canManage }) => {
   const { t, lang } = useTranslation();
   const [documents, setDocuments] = useState<DocumentStatus[]>([]);
   const [loading, setLoading] = useState(false);
@@ -282,8 +287,9 @@ export const DocumentLibraryModal: React.FC<DocumentLibraryModalProps> = ({ isOp
                         </span>
                       )}
 
-                      {/* Toggle Active Loaded State */}
-                      <button
+                      {/* Toggle Active Loaded State — admin only */}
+                      {canManage ? (
+                        <button
                         type="button"
                         onClick={() => handleToggle(doc.id, doc.isLoaded)}
                         disabled={togglingId === doc.id}
@@ -301,6 +307,11 @@ export const DocumentLibraryModal: React.FC<DocumentLibraryModalProps> = ({ isOp
                             : (lang === 'hi' ? 'लोड करें' : lang === 'mr' ? 'लोड करा' : 'Load')}
                         </span>
                       </button>
+                      ) : (
+                        <span className="text-[11px] font-semibold text-slate-400 italic px-1">
+                          {lang === 'hi' ? 'केवल-दृश्य' : lang === 'mr' ? 'फक्त-दृश्य' : 'View only'}
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -332,21 +343,27 @@ export const DocumentLibraryModal: React.FC<DocumentLibraryModalProps> = ({ isOp
 
                   {/* Footer Row: Source URL link & Detailed Inspection */}
                   <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs flex-wrap gap-2">
-                    <a
-                      href={doc.sourceUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center space-x-1 text-amber-800 hover:text-amber-950 font-semibold hover:underline"
-                    >
-                      <span>
-                        {lang === 'hi'
-                          ? 'आधिकारिक स्रोत पोर्टल'
-                          : lang === 'mr'
-                          ? 'अधिकृत स्त्रोत पोर्टल'
-                          : 'Official Source Portal'}
+                    {doc.sourceUrl ? (
+                      <a
+                        href={doc.sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center space-x-1 text-amber-800 hover:text-amber-950 font-semibold hover:underline"
+                      >
+                        <span>
+                          {lang === 'hi'
+                            ? 'आधिकारिक स्रोत पोर्टल'
+                            : lang === 'mr'
+                            ? 'अधिकृत स्त्रोत पोर्टल'
+                            : 'Official Source Portal'}
+                        </span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    ) : (
+                      <span className="text-slate-400 italic">
+                        {lang === 'hi' ? 'स्रोत उपलब्ध नहीं है' : lang === 'mr' ? 'स्त्रोत उपलब्ध नाही' : 'Source unavailable'}
                       </span>
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
+                    )}
 
                     {doc.sections && doc.sections.length > 0 && (
                       <button

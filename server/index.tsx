@@ -24,7 +24,6 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 export async function createServer() {
   const app = express();
 
-  // Security headers via helmet
   app.use(
     helmet({
       contentSecurityPolicy: false,
@@ -32,22 +31,28 @@ export async function createServer() {
     })
   );
 
-  // CORS restricted to current origin
+  const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || process.env.APP_URL || '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+
   app.use(
     cors({
-      origin: true,
+      origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+          return callback(null, true);
+        }
+        return callback(new Error('Not allowed by CORS'));
+      },
       credentials: true
     })
   );
 
-  // Body parser with 1MB limit
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: true, limit: '1mb' }));
-
-  // Cookie parser for JWT token
   app.use(cookieParser());
 
-  // API Health check
   app.get('/api/health', (_req, res) => {
     res.json({
       status: 'ok',
@@ -57,23 +62,17 @@ export async function createServer() {
     });
   });
 
-  // Auth Routes
   app.post('/api/auth/register', handleRegister);
   app.post('/api/auth/login', handleLogin);
   app.post('/api/auth/logout', handleLogout);
   app.get('/api/auth/me', optionalAuth, handleGetMe);
   app.patch('/api/auth/language', requireAuth, handleUpdateLanguage);
 
-  // Application Routes (Protected or optional auth)
   app.use('/api', apiRouter);
 
-  // Serve Frontend: Vite middleware for development, static dist for production
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: {
-        middlewareMode: true,
-        hmr: false
-      },
+      server: { middlewareMode: true, hmr: false },
       appType: 'spa'
     });
     app.use(vite.middlewares);

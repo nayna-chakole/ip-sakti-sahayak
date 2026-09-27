@@ -4,20 +4,35 @@ import jwt from 'jsonwebtoken';
 import { db, UserRecord } from './db.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'ayush-sakti-sahayak-jwt-secret-key-2026';
+if (!process.env.JWT_SECRET) {
+  console.warn(
+    '[SECURITY WARNING] JWT_SECRET is not set. Falling back to a hardcoded development ' +
+    'secret. Set a strong random JWT_SECRET in your Render environment before going to production.'
+  );
+}
 const TOKEN_COOKIE_NAME = 'ip_sakti_token';
 
-export interface AuthenticatedRequest extends Request {
-  user?: UserRecord;
+const ADMIN_BOOTSTRAP_EMAILS = (process.env.ADMIN_BOOTSTRAP_EMAILS || '')
+  .split(',')
+  .map((e) => e.trim().toLowerCase())
+  .filter(Boolean);
+
+type UserWithAccessRole = UserRecord & { accessRole?: string };
+
+function applyAdminBootstrap(user: UserWithAccessRole): UserWithAccessRole {
+  if (ADMIN_BOOTSTRAP_EMAILS.includes(user.email.toLowerCase()) && user.accessRole !== 'admin') {
+    return { ...user, accessRole: 'admin' };
+  }
+  return user;
 }
 
-export function signToken(user: UserRecord): string {
+export interface AuthenticatedRequest extends Request {
+  user?: UserWithAccessRole;
+}
+
+export function signToken(user: UserWithAccessRole): string {
   return jwt.sign(
-    {
-      sub: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role
-    },
+    { sub: user.id, email: user.email, name: user.name, role: user.role, accessRole: user.accessRole },
     JWT_SECRET,
     { expiresIn: '7d' }
   );
@@ -29,7 +44,7 @@ export function setAuthCookie(res: Response, token: string): void {
     sameSite: 'none',
     secure: true,
     path: '/',
-    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    maxAge: 7 * 24 * 60 * 60 * 1000
   });
 }
 
@@ -42,10 +57,6 @@ export function clearAuthCookie(res: Response): void {
   });
 }
 
-/**
- * Authentication Middleware: protects routes and attaches verified user record.
- * Accepts token from EITHER the Authorization: Bearer <token> header OR the cookie.
- */
 export function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   let token = req.cookies?.[TOKEN_COOKIE_NAME];
 
@@ -70,7 +81,7 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
       clearAuthCookie(res);
       return res.status(401).json({ error: 'User account not found. Please sign in again.' });
     }
-    req.user = user;
+    req.user = applyAdminBootstrap(user);
     next();
   } catch {
     clearAuthCookie(res);
@@ -78,11 +89,6 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
   }
 }
 
-/**
- * Optional Authentication Middleware:
- * Checks Authorization header or cookie. If valid, attaches verified user to req.user.
- * If not provided or invalid, leaves req.user undefined and continues without returning 401.
- */
 export function optionalAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   let token = req.cookies?.[TOKEN_COOKIE_NAME];
 
@@ -101,7 +107,7 @@ export function optionalAuth(req: AuthenticatedRequest, res: Response, next: Nex
       const payload = jwt.verify(token, JWT_SECRET) as { sub: string };
       const user = db.findUserById(payload.sub);
       if (user) {
-        req.user = user;
+        req.user = applyAdminBootstrap(user);
       }
     } catch {
       clearAuthCookie(res);
@@ -111,7 +117,6 @@ export function optionalAuth(req: AuthenticatedRequest, res: Response, next: Nex
   next();
 }
 
-// Controller handlers
 export async function handleRegister(req: Request, res: Response) {
   const { name, email, password, confirmPassword, role, consent, preferredLanguage } = req.body;
 
@@ -147,7 +152,7 @@ export async function handleRegister(req: Request, res: Response) {
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
-  const user: UserRecord = {
+  let user: UserRecord = {
     id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
     name: name.trim(),
     email: normalizedEmail,
@@ -158,6 +163,7 @@ export async function handleRegister(req: Request, res: Response) {
   };
 
   db.createUser(user);
+  user = applyAdminBootstrap(user);
 
   const token = signToken(user);
   setAuthCookie(res, token);
@@ -169,6 +175,7 @@ export async function handleRegister(req: Request, res: Response) {
       name: user.name,
       email: user.email,
       role: user.role,
+      accessRole: (user as UserRecord & { accessRole?: string }).accessRole ?? 'user',
       preferredLanguage: user.preferredLanguage
     }
   });
@@ -192,7 +199,7 @@ export async function handleLogin(req: Request, res: Response) {
     });
   }
 
-  const user = db.findUserByEmail(normalizedEmail);
+  let user: UserWithAccessRole | undefined = db.findUserByEmail(normalizedEmail);
   if (!user) {
     const updated = db.recordFailedLogin(normalizedEmail);
     if (updated.lockedUntil) {
@@ -214,8 +221,8 @@ export async function handleLogin(req: Request, res: Response) {
     return res.status(401).json({ error: 'Invalid email or password' });
   }
 
-  // Clear failed attempts on valid login
   db.clearFailedLogins(normalizedEmail);
+  user = applyAdminBootstrap(user);
 
   const token = signToken(user);
   setAuthCookie(res, token);
@@ -227,6 +234,7 @@ export async function handleLogin(req: Request, res: Response) {
       name: user.name,
       email: user.email,
       role: user.role,
+      accessRole: user.accessRole ?? 'user',
       preferredLanguage: user.preferredLanguage
     }
   });
@@ -250,6 +258,7 @@ export function handleGetMe(req: AuthenticatedRequest, res: Response) {
       name: req.user.name,
       email: req.user.email,
       role: req.user.role,
+      accessRole: req.user.accessRole ?? 'user',
       preferredLanguage: req.user.preferredLanguage
     }
   });

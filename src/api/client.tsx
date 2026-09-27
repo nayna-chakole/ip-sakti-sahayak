@@ -3,6 +3,8 @@ export interface User {
   name: string;
   email: string;
   role: 'Student' | 'Researcher' | 'Ayurvedic Practitioner' | 'Manufacturer/Startup' | 'IP Professional';
+  // Authorization role — controls what the user can see/do. NOT the same as `role` above.
+  accessRole: 'admin' | 'expert' | 'user';
   preferredLanguage: 'en' | 'hi' | 'mr';
 }
 
